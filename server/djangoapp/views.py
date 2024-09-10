@@ -15,6 +15,7 @@ import json
 from django.views.decorators.csrf import csrf_exempt
 from .populate import initiate
 from .models import CarMake, CarModel
+from .restapis import get_request, analyze_review_sentiments, post_review
 
 
 # Get an instance of a logger
@@ -110,19 +111,69 @@ def get_cars(request):
     return JsonResponse({"CarModels": cars})
 
 
-# # Update the `get_dealerships` view to render the index page with
-# a list of dealerships
-# def get_dealerships(request):
-# ...
+#Update the `get_dealerships` render list of dealerships all by default, particular state if state is passed
+def get_dealerships(request, state="All"):
+    if(state == "All"):
+        endpoint = "/fetchDealers"
+    else:
+        endpoint = "/fetchDealers/"+state
+    dealerships = get_request(endpoint)
+    return JsonResponse({"status":200,"dealers":dealerships})
 
-# Create a `get_dealer_reviews` view to render the reviews of a dealer
-# def get_dealer_reviews(request,dealer_id):
-# ...
+def get_dealer_reviews(request, dealer_id):
+    # Check if dealer_id has been provided
+    if dealer_id:
+        # Construct the endpoint to fetch reviews for the dealer
+        endpoint = f"/fetchReviews/dealer/{dealer_id}"
+        # Fetch the reviews using get_request function
+        reviews = get_request(endpoint)
 
-# Create a `get_dealer_details` view to render the dealer details
-# def get_dealer_details(request, dealer_id):
-# ...
+        # Loop through each review and analyze the sentiment
+        for review_detail in reviews:
+            # Analyze the sentiment of each review
+            response = analyze_review_sentiments(review_detail['review'])
+            # Set the sentiment in the review_detail dictionary
+            review_detail['sentiment'] = response.get('sentiment', 'neutral')  # default to neutral if not found
 
-# Create a `add_review` view to submit a review
-# def add_review(request):
-# ...
+        # Return the reviews along with their sentiment as a JSON response
+        return JsonResponse({"status": 200, "reviews": reviews})
+    else:
+        # If dealer_id is not provided, return a bad request status
+        return JsonResponse({"status": 400, "message": "Bad Request, dealer ID not provided"})
+
+def get_dealer_details(request, dealer_id):
+    if dealer_id:
+        # Construct the endpoint for fetching dealer details using dealer_id
+        endpoint = f"/fetchDealer/{dealer_id}"
+        # Use the get_request function from restapis.py to get the dealer details
+        dealership = get_request(endpoint)
+        return JsonResponse({"status": 200, "dealer": dealership})
+    else:
+        return JsonResponse({"status": 400, "message": "Bad request, dealer ID not provided"})
+
+@csrf_exempt
+def add_review(request):
+    # Check if the user is authenticated
+    if not request.user.is_anonymous:
+        try:
+            # Parse the JSON request body
+            data = json.loads(request.body)
+            
+            # Call the post_review method to submit the review data
+            response = post_review(data)
+            
+            # Return the response as a JSON response
+            return JsonResponse({"status": 200, "message": "Review posted successfully", "response": response})
+        
+        except json.JSONDecodeError:
+            # Handle JSON parsing errors
+            return JsonResponse({"status": 400, "message": "Invalid JSON format"}, status=400)
+        
+        except Exception as e:
+            # Log the error and return an error message
+            print(f"Error in posting review: {e}")
+            return JsonResponse({"status": 500, "message": "Error in posting review"}, status=500)
+    
+    else:
+        # If the user is not authenticated
+        return JsonResponse({"status": 403, "message": "Unauthorized access"}, status=403)
